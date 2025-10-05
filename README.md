@@ -1,7 +1,6 @@
-# DISCLAIMER: This repo has no intention of begin upgraded. A new version of this repo is being developed for ROS2 support and can be found [here](https://github.com/PedroS235/tello_ros_wrapper)
 # Introduction
 
-Tello **driver_ros_wrapper** is a simple ROS metapackage that allows to control DJI Tello drone via ROS topics.
+Tello **driver_ros_wrapper** is a ROS metapackage that allows to control DJI Tello drone via ROS topics.
 
 In order to communicate with the drone, the python library `tellopy` is being used which can be found [here](https://github.com/hanyazou/TelloPy).
 At this moment, the pose of the drone is being published by the help of an optitrack system, where it is reading the information from the TF frame _world_ to _robot_base_link_.

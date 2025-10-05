@@ -20,7 +20,7 @@
     <arg name="tello_frame_name" default="robot_base_link" />
     <arg name="tello_world_frame_name" default="world" />
 
-    <node name="$(arg tello_driver_name)" pkg="tello_driver" type="tello_driver_ros_node.py" output="screen">
+    <node required="true" name="$(arg tello_driver_name)" pkg="tello_driver" type="tello_driver_ros_node.py" output="screen">
         <remap from="/tello/takeoff" to="$(arg tello_takeoff_topic_name)" />
         <remap from="/tello/land" to="$(arg tello_land_topic_name)" />
         <remap from="/tello/camera/image_raw" to="$(arg tello_image_topic_name)" />

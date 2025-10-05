@@ -49,7 +49,7 @@ class TelloDriverRos:
 
     def init_pub(self):
         print(
-            f"[info] [Tello_driver_ros]- Pubblishing tello pose to <{self.tello_pose_topic_name}>"
+            f"[info] [Tello_driver_ros]- Publishing tello pose to <{self.tello_pose_topic_name}>"
         )
         self.tello_pose_pub = rospy.Publisher(
             self.tello_pose_topic_name, PoseStamped, queue_size=1
@@ -121,8 +121,10 @@ class TelloDriverRos:
     # +------------------+
 
     def publish_tello_cmd_vel(self):
-        twist_msg = TwistStamped
-        twist_msg.header = rospy.Time().now()
+        twist_msg = TwistStamped()
+        twist_msg.header = Header()
+        twist_msg.header.stamp = rospy.Time().now()
+
         tello_vel = self.driver.get_tello_vel()
 
         twist_msg.twist.linear.x = tello_vel["lin"]["x"]
@@ -164,4 +166,3 @@ class TelloDriverRos:
 
     def run(self):
         rospy.spin()
-        self.tello.quit()
