@@ -3,6 +3,7 @@ project(tello_driver)
 
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
+  nav_msgs
   rospy
   std_msgs
   sensor_msgs

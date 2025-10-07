@@ -17,6 +17,7 @@ import rospy
 from sensor_msgs.msg import Image
 from std_msgs.msg import Empty
 from tello_msgs.msg import FlightData, FlipControl
+from nav_msgs.msg import Odometry
 from utils import connect_wifi_device as cwd
 
 # - End of imports
@@ -40,13 +41,14 @@ class TelloDriver(object):
     tello_land_topic_name = "/tello/land"
     tello_image_topic_name = "/tello/camera/image_raw"
     tello_flight_data_topic_name = "/tello/flight_data"
+    tello_odom_topic_name = "/tello/odom"
 
     # - Timers
-    # _battery_percentage_display_timer = None
-    # _battery_percentage_timer_interval = (
-    #     5.0  # will display to screen battery percentage every 5 seconds
-    # )
-    # _current_battery_percentage = 0
+    _battery_percentage_display_timer = None
+    _battery_percentage_timer_interval = (
+        5.0  # will display to screen battery percentage every 5 seconds
+    )
+    _current_battery_percentage = 0
 
     # - Flags
     _connect_to_tello_wifi_auto = True
@@ -73,6 +75,12 @@ class TelloDriver(object):
         # - Setting shutdown routine
         rospy.on_shutdown(self._shutdown_routine)
 
+        # Odometry state
+        self._odom_position = np.zeros(3)
+        self._last_odom_time = None
+        self._odom_frame_id = "map"
+        self._base_frame_id = "base_link"
+
     def begin(self):
         print("[info] [Tello_driver] - Initiating Tello driver")
         self.read_params()
@@ -97,6 +105,12 @@ class TelloDriver(object):
         )
         self._flight_data_pub = rospy.Publisher(
             self.tello_flight_data_topic_name, FlightData, queue_size=1
+        )
+        print(
+            f"[info] [Tello_driver] - Publishing odometry data to <{self.tello_odom_topic_name}>"
+        )
+        self._odom_pub = rospy.Publisher(
+            self.tello_odom_topic_name, Odometry, queue_size=1
         )
 
     def _init_sub(self):
@@ -126,11 +140,11 @@ class TelloDriver(object):
 
         self._tello.subscribe(self._tello.EVENT_FLIGHT_DATA, self._flight_data_handler)
 
-    # def _init_timers(self):
-    #     self._battery_percentage_display_timer = rospy.Timer(
-    #         rospy.Duration(self._battery_percentage_timer_interval),
-    #         self._battery_percentage_display_timer_callback,
-    #     )
+    def _init_timers(self):
+        self._battery_percentage_display_timer = rospy.Timer(
+            rospy.Duration(self._battery_percentage_timer_interval),
+            self._battery_percentage_display_timer_callback,
+        )
 
     def read_params(self):
         print("[info] - Reading parameters")
@@ -144,6 +158,12 @@ class TelloDriver(object):
         self._connect_to_tello_wifi_auto = rospy.get_param(
             "/tello_driver_node/connect_to_tello_wifi_auto",
             default=self._connect_to_tello_wifi_auto,
+        )
+        self._odom_frame_id = rospy.get_param(
+            "/tello_driver_node/odom_frame_id", default=self._odom_frame_id
+        )
+        self._base_frame_id = rospy.get_param(
+            "/tello_driver_node/base_frame_id", default=self._base_frame_id
         )
         print("[info] - Finished reading parameters")
 
@@ -177,20 +197,18 @@ class TelloDriver(object):
     # | Start of Callbacks |
     # +--------------------+
 
-    def _takeoff_callback(self, msg):
-        msg  # - just for not having linting errors
+    def _takeoff_callback(self, _msg):
         print("[info] [Tello_driver] - Taking off")
         self._tello.takeoff()
 
-    def _land_callback(self, msg):
-        msg  # - just for not having linting errors
+    def _land_callback(self, _msg):
         print("[info] [Tello_driver] - Landing")
         self._tello.land()
 
-    # def _battery_percentage_display_timer_callback(self, msg):
-    #     print(
-    #         f"[info] [Tello_driver] - Drone's battery percentage is {self._current_battery_percentage}%"
-    #     )
+    def _battery_percentage_display_timer_callback(self, msg):
+        print(
+            f"[info] [Tello_driver] - Drone's battery percentage is {self._current_battery_percentage}%"
+        )
 
     def _flip_control_callback(self, msg):
         print("[info] [Tello_driver] - Performing a flip")
@@ -211,7 +229,7 @@ class TelloDriver(object):
         flight_data.battery_lower = data.battery_lower
         flight_data.battery_percentage = data.battery_percentage
         flight_data.drone_battery_left = data.drone_battery_left
-        # flight_data.drone_fly_time_left = data.drone_fly_time_left
+        flight_data.drone_fly_time_left = data.drone_fly_time_left
 
         # =========================================================================
 
@@ -236,7 +254,7 @@ class TelloDriver(object):
         flight_data.em_ground = data.em_ground
         flight_data.factory_mode = data.factory_mode
         flight_data.fly_mode = data.fly_mode
-        # flight_data.fly_time = data.fly_time
+        flight_data.fly_time = data.fly_time
         flight_data.front_in = data.front_in
         flight_data.front_lsc = data.front_lsc
         flight_data.front_out = data.front_out
@@ -257,7 +275,7 @@ class TelloDriver(object):
         # - Other
         flight_data.outage_recording = data.outage_recording
         flight_data.smart_video_exit_mode = data.smart_video_exit_mode
-        # flight_data.throw_fly_timer = data.throw_fly_timer
+        flight_data.throw_fly_timer = data.throw_fly_timer
 
         # =========================================================================
 
@@ -265,10 +283,48 @@ class TelloDriver(object):
         flight_data.wifi_disturb = data.wifi_disturb
         flight_data.wifi_strength = data.wifi_strength
 
-        # self._current_battery_percentage = flight_data.battery_percentage
+        self._current_battery_percentage = flight_data.battery_percentage
         self.drone_x_vel = flight_data.north_speed
         self.drone_y_vel = flight_data.east_speed
         self.drone_z_vel = flight_data.ground_speed
+
+        now = rospy.Time.now()
+        if self._last_odom_time is None:
+            self._last_odom_time = now
+        dt = (now - self._last_odom_time).to_sec()
+
+        vx = flight_data.north_speed / 100.0 if flight_data.north_speed is not None else 0.0
+        vy = flight_data.east_speed / 100.0 if flight_data.east_speed is not None else 0.0
+
+        prev_height = self._odom_position[2]
+        height_m = (
+            flight_data.height / 100.0 if flight_data.height is not None else prev_height
+        )
+        vz = 0.0
+        if dt > 0:
+            vz = (height_m - prev_height) / dt
+
+        if dt > 0:
+            self._odom_position[0] += vx * dt
+            self._odom_position[1] += vy * dt
+        self._odom_position[2] = height_m
+
+        odom = Odometry()
+        odom.header.stamp = now
+        odom.header.frame_id = self._odom_frame_id
+        odom.child_frame_id = self._base_frame_id
+        odom.pose.pose.position.x = self._odom_position[0]
+        odom.pose.pose.position.y = self._odom_position[1]
+        odom.pose.pose.position.z = self._odom_position[2]
+        odom.pose.pose.orientation.x = 0.0
+        odom.pose.pose.orientation.y = 0.0
+        odom.pose.pose.orientation.z = 0.0
+        odom.pose.pose.orientation.w = 1.0
+        odom.twist.twist.linear.x = vx
+        odom.twist.twist.linear.y = vy
+        odom.twist.twist.linear.z = vz
+        self._odom_pub.publish(odom)
+        self._last_odom_time = now
 
         # - Publish Flight data
         self._flight_data_pub.publish(flight_data)
